@@ -99,17 +99,22 @@
         // Add new forwarder
         if ($argv[1] == 'add') {
         
-            if (count($argv) == 4) {
+            if (count($argv) >= 4) {
         
                 $data = [];
                 $data['domain'] = end(explode('@', $argv[2]));
                 $data['email'] = $argv[2];
                 $data['fwdopt'] = 'fwd';
-                $data['fwdemail'] = $argv[3];
-        
-                $result = cpanel('Email', 'add_forwarder', $data);
                 
-                echo "Done!\n";
+                foreach (array_slice($argv, 3) as $email) {
+                
+                    $data['fwdemail'] = $email;
+        
+                    $result = cpanel('Email', 'add_forwarder', $data);
+                
+                    echo "Done!\n";
+                    
+                }
                 
             } else {
             
