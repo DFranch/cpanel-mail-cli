@@ -1,0 +1,223 @@
+#!/usr/bin/php
+<?php
+
+    $config = null;
+    $configfile = 'cpanel-mail.ini';
+    $configlocations = [__DIR__, '/etc'];
+    
+    // Function to search results
+    function find($string, $substring) {
+    
+        return (strpos($string, $substring) !== false);
+    
+    }
+    
+    // Function to make CPanel requests
+    function cpanel($module, $function, $data = []) {
+    
+        global $config;
+        
+        $request = "https://" . $config['host'] . ":2083/execute/" . implode('/', [$module, $function]);
+
+        // CURL Request
+        $ch = curl_init($request);
+        curl_setopt($ch, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
+        curl_setopt($ch, CURLOPT_USERPWD, $config['user'] . ':' . $config['password']);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $data);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
+        $response = curl_exec($ch);
+        curl_close($ch);
+
+        $response = json_decode($response, true);
+        if(json_last_error() !== 0) {
+        
+            echo "API Error: " . $response . "\n";
+            exit();
+            
+        } elseif (!$response['status']) {
+        
+            echo "API Error: " . $response['errors'][0] . "\n";
+            exit();
+            
+        }
+
+        return $response;
+    
+    }
+    
+    // Function to get email forwarders
+    function getForwarders() {
+    
+        $result = cpanel('Email', 'list_forwarders');
+        
+        return $result['data'];
+    
+    }
+
+    // Try to find config file    
+    foreach ($configlocations as $location) {
+        
+        $filelocation = implode('/', [$location, $configfile]);
+        
+        if (file_exists($filelocation)) {
+        
+            $config = $filelocation;
+            break;
+        
+        }
+        
+    }
+    
+    // Cannot find config file
+    if ($config === null) {
+    
+        echo "Cannot find config file\n";
+        exit();
+    
+    }
+  
+    // Check all requirements
+    $config = parse_ini_file($config, false);
+    foreach (['user', 'password', 'host'] as $requirement) {
+    
+        if (!isset($config[ $requirement ])) {
+        
+            echo $requirement . " not defined\n";
+            exit();
+        
+        }
+        
+    }
+    
+    // Check if is a valid command
+    if ((isset($argv[1])) && (in_array($argv[1], ['add', 'del', 'list']))) {
+    
+        // Add new forwarder
+        if ($argv[1] == 'add') {
+        
+            if (count($argv) == 4) {
+        
+                $data = [];
+                $data['domain'] = end(explode('@', $argv[2]));
+                $data['email'] = $argv[2];
+                $data['fwdopt'] = 'fwd';
+                $data['fwdemail'] = $argv[3];
+        
+                $result = cpanel('Email', 'add_forwarder', $data);
+                
+                echo "Done!\n";
+                
+            } else {
+            
+                echo "Invalid command\n";
+            
+            }
+        
+        // Delete forwarder
+        } else if ($argv[1] == 'del') {
+        
+            if (count($argv) == 4) {
+        
+                $data = [];
+                $data['address'] = $argv[2];
+                $data['forwarder'] = $argv[3];
+        
+                $result = cpanel('Email', 'delete_forwarder', $data);
+                
+                echo "Done!\n";
+                
+            } else {
+            
+                echo "Invalid command\n";
+            
+            }
+        
+        // List forwarders
+        } else if ($argv[1] == 'list') {
+        
+            $result = getForwarders();
+            
+            // Cannot find any result
+            if (count($result) == 0){
+            
+                echo "Cannot find any result\n";
+                
+            // Server has at least one forwarder
+            } else {
+            
+                // Largest strings
+                $max = [];
+                $max['dest'] = 0;
+                $max['forward'] = 0;
+                
+                // For each result
+                foreach ($result as $key => $forwarder) {
+                
+                    // Filter
+                    if ((!isset($argv[2])) || (find(implode(' ', [$forwarder['dest'], $forwarder['forward']]), $argv[2]))) {
+                
+                        // Get largest string
+                        foreach (['dest', 'forward'] as $string) {
+                            $max[$string] = (strlen($forwarder[$string]) > $max[$string]) ? strlen($forwarder[$string]) : $max[$string];
+                        }
+                        
+                    // Filtered
+                    } else {
+                    
+                        // Remove from results
+                        unset($result[$key]);
+                    
+                    }
+                
+                }
+                
+                // Cannot find any result
+                if (count($result) == 0) {
+                
+                    echo "Cannot find any result\n";
+                
+                // Has results
+                } else {
+                
+                    // Separator
+                    $separator =  str_pad('', $max['dest'] + $max['forward'] + 7, '-') . "\n";
+                    
+                    // Table header
+                    echo $separator;
+                    echo '| ' . str_pad('FROM', $max['dest'], ' ', STR_PAD_BOTH);
+                    echo ' | ' . str_pad('TO', $max['forward'], ' ', STR_PAD_BOTH) . " |\n";
+                    echo $separator;
+                    
+                    // Results
+                    foreach ($result as $forwarder) {
+                    
+                        $from = $forwarder['dest'];
+                        $to = $forwarder['forward'];
+                    
+                        echo '| ' . str_pad($from, $max['dest']) . ' | ' . str_pad($to, $max['forward']) . " |\n";
+                    
+                    }
+                    
+                    // End of table
+                    echo $separator;
+                    
+                }
+                
+            }
+            
+        }
+    
+    } else {
+    
+        echo "Usage: ./cpanelmail [add | del | list]\n";
+        echo "./cpanelmail add [from] [to]\n";
+        echo "./cpanelmail del [from] [to]\n";
+        echo "./cpanelmail list <search>\n";
+    
+    }
+  
+?>

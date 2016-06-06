@@ -1,0 +1,4 @@
+[cpanel]
+host = "myserver.com"
+user = "myuser"
+password = "password"
